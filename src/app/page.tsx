@@ -1,85 +1,97 @@
 import { BellRing, CalendarClock, CreditCard, Sparkles, Wallet } from "lucide-react";
+import { AddSubscriptionForm } from "@/components/add-subscription-form";
+import { prisma } from "@/lib/prisma";
 
-const subscriptions = [
-  {
-    name: "Netflix",
-    category: "Entertainment",
-    price: 15.99,
-    cycle: "Monthly",
-    nextBilling: "Apr 08",
-    status: "Active",
-    color: "bg-rose-500",
-  },
-  {
-    name: "Spotify",
-    category: "Music",
-    price: 9.99,
-    cycle: "Monthly",
-    nextBilling: "Apr 12",
-    status: "Active",
-    color: "bg-emerald-500",
-  },
-  {
-    name: "Notion AI",
-    category: "Productivity",
-    price: 10,
-    cycle: "Monthly",
-    nextBilling: "Apr 15",
-    status: "Trial ending",
-    color: "bg-zinc-900",
-  },
-  {
-    name: "iCloud+",
-    category: "Cloud",
-    price: 2.99,
-    cycle: "Monthly",
-    nextBilling: "Apr 18",
-    status: "Active",
-    color: "bg-sky-500",
-  },
-];
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+  }).format(date);
+}
 
-const upcoming = [
-  "Notion AI trial ends in 3 days",
-  "Netflix renews this week",
-  "2 subscriptions cost more than $10/month",
-];
+function formatCurrency(value: number, currency = "USD") {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
 
-const categorySpend = [
-  { label: "Entertainment", value: 15.99, width: "76%" },
-  { label: "Productivity", value: 10, width: "48%" },
-  { label: "Music", value: 9.99, width: "47%" },
-  { label: "Cloud", value: 2.99, width: "14%" },
-];
+function getCycleLabel(cycle: string) {
+  return cycle.charAt(0) + cycle.slice(1).toLowerCase();
+}
 
-const stats = [
-  {
-    label: "Monthly spend",
-    value: "$38.97",
-    note: "+$10 trial risk this month",
-    icon: Wallet,
-  },
-  {
-    label: "Active subscriptions",
-    value: "4",
-    note: "1 trial needs attention",
-    icon: CreditCard,
-  },
-  {
-    label: "Next 30 days",
-    value: "3 renewals",
-    note: "Earliest on Apr 08",
-    icon: CalendarClock,
-  },
-  {
-    label: "Smart reminders",
-    value: "3",
-    note: "Potential savings highlighted",
-    icon: BellRing,
-  },
-];
+export default async function Home() {
+  const subscriptions = await prisma.subscription.findMany({
+    orderBy: {
+      nextBillingDate: "asc",
+    },
+  });
 
-export default function Home() {
+  const activeSubscriptions = subscriptions.filter((item) => item.status === "ACTIVE");
+  const monthlySpend = activeSubscriptions.reduce((sum, item) => {
+    if (item.billingCycle === "YEARLY") return sum + item.price / 12;
+    if (item.billingCycle === "WEEKLY") return sum + item.price * 4;
+    return sum + item.price;
+  }, 0);
+
+  const next30Days = new Date();
+  next30Days.setDate(next30Days.getDate() + 30);
+
+  const upcomingSubscriptions = activeSubscriptions.filter(
+    (item) => item.nextBillingDate <= next30Days,
+  );
+
+  const categoryMap = new Map<string, number>();
+  for (const item of activeSubscriptions) {
+    const current = categoryMap.get(item.category) ?? 0;
+    categoryMap.set(item.category, current + item.price);
+  }
+
+  const categorySpend = [...categoryMap.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+
+  const topCategoryValue = categorySpend[0]?.value ?? 1;
+
+  const reminders = [
+    ...subscriptions
+      .filter((item) => item.trialEndsAt)
+      .slice(0, 1)
+      .map((item) => `${item.name} trial ends on ${formatDate(item.trialEndsAt!)}`),
+    ...upcomingSubscriptions.slice(0, 2).map((item) => `${item.name} renews on ${formatDate(item.nextBillingDate)}`),
+  ].slice(0, 3);
+
+  const stats = [
+    {
+      label: "Monthly spend",
+      value: formatCurrency(monthlySpend),
+      note: `${activeSubscriptions.length} active subscriptions tracked`,
+      icon: Wallet,
+    },
+    {
+      label: "Active subscriptions",
+      value: String(activeSubscriptions.length),
+      note: `${subscriptions.length - activeSubscriptions.length} inactive or canceled`,
+      icon: CreditCard,
+    },
+    {
+      label: "Next 30 days",
+      value: `${upcomingSubscriptions.length} renewals`,
+      note:
+        upcomingSubscriptions[0] != null
+          ? `Earliest on ${formatDate(upcomingSubscriptions[0].nextBillingDate)}`
+          : "No renewals due soon",
+      icon: CalendarClock,
+    },
+    {
+      label: "Smart reminders",
+      value: String(reminders.length),
+      note: reminders[0] ?? "No urgent reminders yet",
+      icon: BellRing,
+    },
+  ];
+
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-6 py-10 lg:px-10">
       <section className="mb-8 flex flex-col gap-6 rounded-[32px] border border-white/60 bg-white/80 p-8 shadow-[0_20px_80px_rgba(79,70,229,0.10)] backdrop-blur md:flex-row md:items-end md:justify-between">
@@ -93,16 +105,16 @@ export default function Home() {
               Stop forgetting renewals. Start understanding your recurring spend.
             </h1>
             <p className="max-w-xl text-base leading-7 text-slate-600 md:text-lg">
-              SubTrackr helps you track subscriptions, spot upcoming charges, and cut unused services before they drain your budget.
+              SubTrackr now reads from a real SQLite database, so every subscription you add updates the dashboard and reminders.
             </p>
           </div>
         </div>
 
         <div className="grid min-w-[280px] gap-3 rounded-3xl bg-slate-950 p-5 text-white shadow-lg">
           <div className="text-sm text-slate-300">This month</div>
-          <div className="text-4xl font-semibold">$38.97</div>
+          <div className="text-4xl font-semibold">{formatCurrency(monthlySpend)}</div>
           <div className="rounded-2xl bg-white/10 p-4 text-sm text-slate-200">
-            3 renewals and 1 trial expiration in the next 30 days.
+            {upcomingSubscriptions.length} renewals and {subscriptions.filter((item) => item.trialEndsAt).length} tracked trial expirations in the next 30 days.
           </div>
         </div>
       </section>
@@ -126,70 +138,99 @@ export default function Home() {
         })}
       </section>
 
-      <section className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">Subscriptions</h2>
-              <p className="text-sm text-slate-500">A practical MVP snapshot of tracked recurring costs.</p>
-            </div>
-            <button className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">
-              Add subscription
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {subscriptions.map((item) => (
-              <div
-                key={item.name}
-                className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`h-11 w-11 rounded-2xl ${item.color}`} />
-                  <div>
-                    <div className="font-medium text-slate-900">{item.name}</div>
-                    <div className="text-sm text-slate-500">
-                      {item.category} · {item.cycle}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-1 text-sm md:text-right">
-                  <div className="font-medium text-slate-900">${item.price.toFixed(2)}</div>
-                  <div className="text-slate-500">Next billing: {item.nextBilling}</div>
-                  <div className="text-xs font-medium text-amber-600">{item.status}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-
+      <section className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
         <div className="grid gap-6">
           <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-900">Upcoming reminders</h2>
-            <div className="mt-4 space-y-3">
-              {upcoming.map((item) => (
-                <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
-                  {item}
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Subscriptions</h2>
+                <p className="text-sm text-slate-500">Live data from your local SQLite-backed MVP.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {subscriptions.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                  No subscriptions yet. Add your first one to start tracking recurring costs.
                 </div>
-              ))}
+              ) : (
+                subscriptions.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className="h-11 w-11 rounded-2xl"
+                        style={{ backgroundColor: item.color ?? "#6366f1" }}
+                      />
+                      <div>
+                        <div className="font-medium text-slate-900">{item.name}</div>
+                        <div className="text-sm text-slate-500">
+                          {item.category} · {getCycleLabel(item.billingCycle)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-1 text-sm md:text-right">
+                      <div className="font-medium text-slate-900">
+                        {formatCurrency(item.price, item.currency)}
+                      </div>
+                      <div className="text-slate-500">
+                        Next billing: {formatDate(item.nextBillingDate)}
+                      </div>
+                      <div className="text-xs font-medium text-amber-600">{item.status}</div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </article>
 
           <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-900">Upcoming reminders</h2>
+            <div className="mt-4 space-y-3">
+              {reminders.length === 0 ? (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                  No urgent reminders. Add more subscriptions or trial dates to populate this view.
+                </div>
+              ) : (
+                reminders.map((item) => (
+                  <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                    {item}
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+        </div>
+
+        <div className="grid gap-6">
+          <AddSubscriptionForm />
+
+          <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-semibold text-slate-900">Spend by category</h2>
             <div className="mt-5 space-y-4">
-              {categorySpend.map((item) => (
-                <div key={item.label} className="space-y-2">
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>{item.label}</span>
-                    <span>${item.value.toFixed(2)}</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100">
-                    <div className="h-2 rounded-full bg-indigo-500" style={{ width: item.width }} />
-                  </div>
+              {categorySpend.length === 0 ? (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                  Category insights will appear after you add subscriptions.
                 </div>
-              ))}
+              ) : (
+                categorySpend.map((item) => (
+                  <div key={item.label} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-slate-600">
+                      <span>{item.label}</span>
+                      <span>{formatCurrency(item.value)}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div
+                        className="h-2 rounded-full bg-indigo-500"
+                        style={{ width: `${Math.max((item.value / topCategoryValue) * 100, 8)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </article>
         </div>
