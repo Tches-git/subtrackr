@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { BellRing, CalendarClock, CreditCard, Sparkles, Wallet } from "lucide-react";
-import { AddSubscriptionForm } from "@/components/add-subscription-form";
 import { DeleteSubscriptionButton } from "@/components/delete-subscription-button";
+import { EditSubscriptionLink } from "@/components/edit-subscription-link";
+import { SubscriptionForm } from "@/components/subscription-form";
 import { prisma } from "@/lib/prisma";
 
 function formatDate(date: Date) {
@@ -23,6 +24,13 @@ function getCycleLabel(cycle: string) {
   return cycle.charAt(0) + cycle.slice(1).toLowerCase();
 }
 
+function getMessageLabel(message: string | undefined) {
+  if (message === "created") return "Subscription created successfully.";
+  if (message === "updated") return "Subscription updated successfully.";
+  if (message === "deleted") return "Subscription deleted successfully.";
+  return null;
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -30,6 +38,9 @@ export default async function Home({
 }) {
   const params = (await searchParams) ?? {};
   const selectedCategory = typeof params.category === "string" ? params.category : "all";
+  const editId = typeof params.edit === "string" ? params.edit : undefined;
+  const messageKey = typeof params.message === "string" ? params.message : undefined;
+  const messageLabel = getMessageLabel(messageKey);
 
   const subscriptions = await prisma.subscription.findMany({
     where: selectedCategory === "all" ? undefined : { category: selectedCategory },
@@ -44,6 +55,10 @@ export default async function Home({
     orderBy: { category: "asc" },
   });
   const allCategories = allCategoriesRaw.map((item) => item.category);
+
+  const editingSubscription = editId
+    ? await prisma.subscription.findUnique({ where: { id: editId } })
+    : null;
 
   const activeSubscriptions = subscriptions.filter((item) => item.status === "ACTIVE");
   const monthlySpend = activeSubscriptions.reduce((sum, item) => {
@@ -143,9 +158,14 @@ export default async function Home({
               Stop forgetting renewals. Start understanding your recurring spend.
             </h1>
             <p className="max-w-xl text-base leading-7 text-slate-600 md:text-lg">
-              SubTrackr now reads from a real SQLite database, supports quick add/delete, and highlights the most urgent renewals and trial expirations.
+              SubTrackr now reads from a real SQLite database, supports quick add/edit/delete, and highlights the most urgent renewals and trial expirations.
             </p>
           </div>
+          {messageLabel ? (
+            <div className="inline-flex rounded-full bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+              {messageLabel}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid min-w-[280px] gap-3 rounded-3xl bg-slate-950 p-5 text-white shadow-lg">
@@ -245,7 +265,10 @@ export default async function Home({
                         {item.trialEndsAt ? <span>Trial ends: {formatDate(item.trialEndsAt)}</span> : null}
                         {item.website ? <span>{item.website}</span> : null}
                       </div>
-                      <DeleteSubscriptionButton id={item.id} />
+                      <div className="flex flex-wrap gap-2">
+                        <EditSubscriptionLink id={item.id} />
+                        <DeleteSubscriptionButton id={item.id} />
+                      </div>
                     </div>
                   </div>
                 ))
@@ -275,7 +298,7 @@ export default async function Home({
         </div>
 
         <div className="grid gap-6">
-          <AddSubscriptionForm />
+          <SubscriptionForm mode={editingSubscription ? "edit" : "create"} subscription={editingSubscription ?? undefined} />
 
           <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-semibold text-slate-900">Spend by category</h2>
