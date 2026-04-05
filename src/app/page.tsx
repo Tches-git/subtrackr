@@ -233,6 +233,17 @@ export default async function Home({
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Subscriptions</h2>
                 <p className="text-sm text-slate-500">Live data from your local SQLite-backed MVP.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link href="/reminders" className="rounded-full border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:border-slate-300">
+                    Open reminder center
+                  </Link>
+                  <Link href="/api/export?format=json" className="rounded-full border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:border-slate-300">
+                    Export JSON
+                  </Link>
+                  <Link href="/api/export?format=csv" className="rounded-full border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:border-slate-300">
+                    Export CSV
+                  </Link>
+                </div>
               </div>
 
               <div className="grid gap-3">

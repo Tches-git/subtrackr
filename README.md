@@ -7,6 +7,8 @@ A practical subscription tracker for everyday users. Track recurring payments, s
 - Live subscription list backed by SQLite
 - Upcoming reminders
 - Category, status, and sort controls
+- Reminder center page
+- JSON / CSV export endpoint
 - Category spend overview
 - Add/edit/delete subscription flow with server actions
 - Prisma + SQLite data layer
