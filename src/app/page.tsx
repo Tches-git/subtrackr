@@ -3,6 +3,7 @@ import { SubscriptionStatus } from "@/generated/prisma/client";
 import { BellRing, CalendarClock, CreditCard, Sparkles, Wallet } from "lucide-react";
 import { DeleteSubscriptionButton } from "@/components/delete-subscription-button";
 import { EditSubscriptionLink } from "@/components/edit-subscription-link";
+import { ImportSubscriptionsForm } from "@/components/import-subscriptions-form";
 import { SubscriptionForm } from "@/components/subscription-form";
 import { prisma } from "@/lib/prisma";
 
@@ -29,6 +30,7 @@ function getMessageLabel(message: string | undefined) {
   if (message === "created") return "Subscription created successfully.";
   if (message === "updated") return "Subscription updated successfully.";
   if (message === "deleted") return "Subscription deleted successfully.";
+  if (message === "imported") return "Subscriptions imported successfully.";
   return null;
 }
 
@@ -378,6 +380,8 @@ export default async function Home({
 
         <div className="grid gap-6">
           <SubscriptionForm mode={editingSubscription ? "edit" : "create"} subscription={editingSubscription ?? undefined} />
+
+          <ImportSubscriptionsForm />
 
           <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-semibold text-slate-900">Spend by category</h2>

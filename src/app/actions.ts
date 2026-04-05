@@ -9,6 +9,12 @@ function getString(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeBillingCycle(value: string) {
+  return Object.values(BillingCycle).includes(value as BillingCycle)
+    ? (value as BillingCycle)
+    : BillingCycle.MONTHLY;
+}
+
 export async function createSubscription(formData: FormData) {
   const name = getString(formData.get("name"));
   const category = getString(formData.get("category")) || "Other";
@@ -29,9 +35,7 @@ export async function createSubscription(formData: FormData) {
     throw new Error("Invalid subscription input");
   }
 
-  const billingCycle = Object.values(BillingCycle).includes(billingCycleValue as BillingCycle)
-    ? (billingCycleValue as BillingCycle)
-    : BillingCycle.MONTHLY;
+  const billingCycle = normalizeBillingCycle(billingCycleValue);
 
   await prisma.subscription.create({
     data: {
@@ -75,9 +79,7 @@ export async function updateSubscription(formData: FormData) {
     throw new Error("Invalid subscription input");
   }
 
-  const billingCycle = Object.values(BillingCycle).includes(billingCycleValue as BillingCycle)
-    ? (billingCycleValue as BillingCycle)
-    : BillingCycle.MONTHLY;
+  const billingCycle = normalizeBillingCycle(billingCycleValue);
 
   await prisma.subscription.update({
     where: { id },
@@ -112,4 +114,55 @@ export async function deleteSubscription(formData: FormData) {
 
   revalidatePath("/");
   redirect("/?message=deleted");
+}
+
+export async function importSubscriptions(formData: FormData) {
+  const payload = getString(formData.get("payload"));
+
+  if (!payload) {
+    throw new Error("Import payload is empty");
+  }
+
+  const parsed = JSON.parse(payload) as Array<Record<string, unknown>>;
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Import payload must be a JSON array");
+  }
+
+  for (const item of parsed) {
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    const category = typeof item.category === "string" ? item.category.trim() : "Other";
+    const price = Number(item.price ?? 0);
+    const currency = typeof item.currency === "string" ? item.currency.trim() || "USD" : "USD";
+    const billingCycle = normalizeBillingCycle(typeof item.billingCycle === "string" ? item.billingCycle : "MONTHLY");
+    const nextBillingDateValue = typeof item.nextBillingDate === "string" ? item.nextBillingDate : "";
+    const trialEndsAtValue = typeof item.trialEndsAt === "string" ? item.trialEndsAt : "";
+    const color = typeof item.color === "string" ? item.color : "#6366f1";
+    const website = typeof item.website === "string" ? item.website : null;
+    const notes = typeof item.notes === "string" ? item.notes : null;
+
+    if (!name || Number.isNaN(price) || price < 0 || !nextBillingDateValue) {
+      continue;
+    }
+
+    await prisma.subscription.create({
+      data: {
+        name,
+        category,
+        price,
+        currency,
+        billingCycle,
+        billingInterval: 1,
+        status: SubscriptionStatus.ACTIVE,
+        nextBillingDate: new Date(nextBillingDateValue),
+        trialEndsAt: trialEndsAtValue ? new Date(trialEndsAtValue) : null,
+        color,
+        website,
+        notes,
+      },
+    });
+  }
+
+  revalidatePath("/");
+  redirect("/?message=imported");
 }
