@@ -15,12 +15,14 @@ export async function createSubscription(formData: FormData) {
   const currency = getString(formData.get("currency")) || "USD";
   const billingCycleValue = getString(formData.get("billingCycle")) || "MONTHLY";
   const nextBillingDateValue = getString(formData.get("nextBillingDate"));
+  const trialEndsAtValue = getString(formData.get("trialEndsAt"));
   const color = getString(formData.get("color")) || "#6366f1";
   const website = getString(formData.get("website"));
   const notes = getString(formData.get("notes"));
 
   const price = Number(priceValue);
   const nextBillingDate = nextBillingDateValue ? new Date(nextBillingDateValue) : null;
+  const trialEndsAt = trialEndsAtValue ? new Date(trialEndsAtValue) : null;
 
   if (!name || Number.isNaN(price) || price < 0 || !nextBillingDate) {
     throw new Error("Invalid subscription input");
@@ -40,10 +42,25 @@ export async function createSubscription(formData: FormData) {
       billingInterval: 1,
       status: SubscriptionStatus.ACTIVE,
       nextBillingDate,
+      trialEndsAt,
       color,
       website: website || null,
       notes: notes || null,
     },
+  });
+
+  revalidatePath("/");
+}
+
+export async function deleteSubscription(formData: FormData) {
+  const id = getString(formData.get("id"));
+
+  if (!id) {
+    throw new Error("Missing subscription id");
+  }
+
+  await prisma.subscription.delete({
+    where: { id },
   });
 
   revalidatePath("/");

@@ -53,6 +53,11 @@ export function AddSubscriptionForm() {
         </label>
 
         <label className="grid gap-2 text-sm text-slate-600">
+          Trial ends at
+          <input name="trialEndsAt" type="date" className="rounded-2xl border border-slate-200 px-4 py-3 outline-none ring-0 focus:border-indigo-400" />
+        </label>
+
+        <label className="grid gap-2 text-sm text-slate-600">
           Brand color
           <input name="color" type="color" defaultValue="#6366f1" className="h-12 rounded-2xl border border-slate-200 px-2 py-2 outline-none ring-0 focus:border-indigo-400" />
         </label>
