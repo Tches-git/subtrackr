@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SubscriptionStatus } from "@/generated/prisma/client";
 import { BellRing, CalendarClock, CreditCard, Sparkles, Wallet } from "lucide-react";
 import { DeleteSubscriptionButton } from "@/components/delete-subscription-button";
 import { EditSubscriptionLink } from "@/components/edit-subscription-link";
@@ -38,15 +39,33 @@ export default async function Home({
 }) {
   const params = (await searchParams) ?? {};
   const selectedCategory = typeof params.category === "string" ? params.category : "all";
+  const selectedStatusParam = typeof params.status === "string" ? params.status : "all";
+  const selectedSort = typeof params.sort === "string" ? params.sort : "nextBilling";
+  const selectedStatus =
+    selectedStatusParam === "ACTIVE" ||
+    selectedStatusParam === "PAUSED" ||
+    selectedStatusParam === "CANCELED"
+      ? selectedStatusParam
+      : "all";
   const editId = typeof params.edit === "string" ? params.edit : undefined;
   const messageKey = typeof params.message === "string" ? params.message : undefined;
   const messageLabel = getMessageLabel(messageKey);
 
+  const where = {
+    ...(selectedCategory === "all" ? {} : { category: selectedCategory }),
+    ...(selectedStatus === "all" ? {} : { status: selectedStatus as SubscriptionStatus }),
+  };
+
   const subscriptions = await prisma.subscription.findMany({
-    where: selectedCategory === "all" ? undefined : { category: selectedCategory },
-    orderBy: {
-      nextBillingDate: "asc",
-    },
+    where,
+    orderBy:
+      selectedSort === "priceDesc"
+        ? { price: "desc" }
+        : selectedSort === "priceAsc"
+          ? { price: "asc" }
+          : selectedSort === "name"
+            ? { name: "asc" }
+            : { nextBillingDate: "asc" },
   });
 
   const allCategoriesRaw = await prisma.subscription.findMany({
@@ -65,6 +84,11 @@ export default async function Home({
     if (item.billingCycle === "YEARLY") return sum + item.price / 12;
     if (item.billingCycle === "WEEKLY") return sum + item.price * 4;
     return sum + item.price;
+  }, 0);
+  const annualSpend = activeSubscriptions.reduce((sum, item) => {
+    if (item.billingCycle === "YEARLY") return sum + item.price;
+    if (item.billingCycle === "WEEKLY") return sum + item.price * 52;
+    return sum + item.price * 12;
   }, 0);
 
   const now = new Date();
@@ -123,6 +147,12 @@ export default async function Home({
       icon: Wallet,
     },
     {
+      label: "Annualized spend",
+      value: formatCurrency(annualSpend),
+      note: "Estimated based on current billing cycles",
+      icon: Wallet,
+    },
+    {
       label: "Active subscriptions",
       value: String(activeSubscriptions.length),
       note: `${subscriptions.length - activeSubscriptions.length} inactive or canceled`,
@@ -177,7 +207,7 @@ export default async function Home({
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {stats.map((item) => {
           const Icon = item.icon;
           return (
@@ -205,29 +235,66 @@ export default async function Home({
                 <p className="text-sm text-slate-500">Live data from your local SQLite-backed MVP.</p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href="/"
-                  className={`rounded-full px-3 py-2 text-sm ${selectedCategory === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
-                >
-                  All
-                </Link>
-                {allCategories.map((category) => (
+              <div className="grid gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "Next billing", value: "nextBilling" },
+                    { label: "Price ↑", value: "priceAsc" },
+                    { label: "Price ↓", value: "priceDesc" },
+                    { label: "Name", value: "name" },
+                  ].map((sort) => (
+                    <Link
+                      key={sort.value}
+                      href={`/?${selectedCategory === "all" ? "" : `category=${encodeURIComponent(selectedCategory)}&`}status=${selectedStatus}&sort=${sort.value}`}
+                      className={`rounded-full px-3 py-2 text-sm ${selectedSort === sort.value ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {sort.label}
+                    </Link>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <Link
-                    key={category}
-                    href={`/?category=${encodeURIComponent(category)}`}
-                    className={`rounded-full px-3 py-2 text-sm ${selectedCategory === category ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                    href={`/?status=${selectedStatus}&sort=${selectedSort}`}
+                    className={`rounded-full px-3 py-2 text-sm ${selectedCategory === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
                   >
-                    {category}
+                    All categories
                   </Link>
-                ))}
+                  {allCategories.map((category) => (
+                    <Link
+                      key={category}
+                      href={`/?category=${encodeURIComponent(category)}&status=${selectedStatus}&sort=${selectedSort}`}
+                      className={`rounded-full px-3 py-2 text-sm ${selectedCategory === category ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {category}
+                    </Link>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "All statuses", value: "all" },
+                    { label: "Active", value: "ACTIVE" },
+                    { label: "Paused", value: "PAUSED" },
+                    { label: "Canceled", value: "CANCELED" },
+                  ].map((status) => (
+                    <Link
+                      key={status.value}
+                      href={`/?${selectedCategory === "all" ? "" : `category=${encodeURIComponent(selectedCategory)}&`}status=${status.value}&sort=${selectedSort}`}
+                      className={`rounded-full px-3 py-2 text-sm ${selectedStatus === status.value ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700"}`}
+                    >
+                      {status.label}
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
 
             <div className="space-y-3">
               {subscriptions.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-                  No subscriptions in this view yet. Add your first one to start tracking recurring costs.
+                  No subscriptions in this view yet.
+                  <div className="mt-2 text-slate-400">
+                    Try switching filters or add your first subscription to start tracking recurring costs.
+                  </div>
                 </div>
               ) : (
                 subscriptions.map((item) => (
@@ -264,6 +331,7 @@ export default async function Home({
                       <div className="flex flex-wrap gap-3">
                         {item.trialEndsAt ? <span>Trial ends: {formatDate(item.trialEndsAt)}</span> : null}
                         {item.website ? <span>{item.website}</span> : null}
+                        {item.notes ? <span className="max-w-[280px] truncate">{item.notes}</span> : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <EditSubscriptionLink id={item.id} />
