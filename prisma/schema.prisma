@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+  WEEKLY
+  CUSTOM
+  TRIAL
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELED
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  name            String
+  category        String
+  price           Float
+  currency        String             @default("USD")
+  billingCycle    BillingCycle
+  billingInterval Int                @default(1)
+  status          SubscriptionStatus @default(ACTIVE)
+  nextBillingDate DateTime
+  trialEndsAt     DateTime?
+  lastUsedAt      DateTime?
+  notes           String?
+  website         String?
+  color           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
