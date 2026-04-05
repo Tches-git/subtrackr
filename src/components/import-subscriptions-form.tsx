@@ -21,7 +21,7 @@ export function ImportSubscriptionsForm() {
       <div>
         <h2 className="text-xl font-semibold text-slate-900">Import JSON</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Paste an exported JSON array to bulk-create subscriptions.
+          Paste an exported JSON array to bulk-create subscriptions. Duplicate items with the same name, price, and next billing date will be skipped.
         </p>
       </div>
 

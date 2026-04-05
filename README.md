@@ -8,7 +8,7 @@ A practical subscription tracker for everyday users. Track recurring payments, s
 - Upcoming reminders
 - Category, status, and sort controls
 - Reminder center page
-- JSON import form
+- JSON import form with duplicate skipping
 - JSON / CSV export endpoint
 - Category spend overview
 - Add/edit/delete subscription flow with server actions

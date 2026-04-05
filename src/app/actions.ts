@@ -129,6 +129,9 @@ export async function importSubscriptions(formData: FormData) {
     throw new Error("Import payload must be a JSON array");
   }
 
+  let imported = 0;
+  let skipped = 0;
+
   for (const item of parsed) {
     const name = typeof item.name === "string" ? item.name.trim() : "";
     const category = typeof item.category === "string" ? item.category.trim() : "Other";
@@ -142,6 +145,23 @@ export async function importSubscriptions(formData: FormData) {
     const notes = typeof item.notes === "string" ? item.notes : null;
 
     if (!name || Number.isNaN(price) || price < 0 || !nextBillingDateValue) {
+      skipped += 1;
+      continue;
+    }
+
+    const nextBillingDate = new Date(nextBillingDateValue);
+
+    const existing = await prisma.subscription.findFirst({
+      where: {
+        name,
+        price,
+        nextBillingDate,
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      skipped += 1;
       continue;
     }
 
@@ -154,15 +174,17 @@ export async function importSubscriptions(formData: FormData) {
         billingCycle,
         billingInterval: 1,
         status: SubscriptionStatus.ACTIVE,
-        nextBillingDate: new Date(nextBillingDateValue),
+        nextBillingDate,
         trialEndsAt: trialEndsAtValue ? new Date(trialEndsAtValue) : null,
         color,
         website,
         notes,
       },
     });
+
+    imported += 1;
   }
 
   revalidatePath("/");
-  redirect("/?message=imported");
+  redirect(`/?message=imported&imported=${imported}&skipped=${skipped}`);
 }

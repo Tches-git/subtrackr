@@ -26,11 +26,19 @@ function getCycleLabel(cycle: string) {
   return cycle.charAt(0) + cycle.slice(1).toLowerCase();
 }
 
-function getMessageLabel(message: string | undefined) {
+function getMessageLabel(
+  message: string | undefined,
+  imported?: string,
+  skipped?: string,
+) {
   if (message === "created") return "Subscription created successfully.";
   if (message === "updated") return "Subscription updated successfully.";
   if (message === "deleted") return "Subscription deleted successfully.";
-  if (message === "imported") return "Subscriptions imported successfully.";
+  if (message === "imported") {
+    const importedCount = Number(imported ?? 0);
+    const skippedCount = Number(skipped ?? 0);
+    return `Import complete: ${importedCount} added, ${skippedCount} skipped.`;
+  }
   return null;
 }
 
@@ -51,7 +59,9 @@ export default async function Home({
       : "all";
   const editId = typeof params.edit === "string" ? params.edit : undefined;
   const messageKey = typeof params.message === "string" ? params.message : undefined;
-  const messageLabel = getMessageLabel(messageKey);
+  const importedCount = typeof params.imported === "string" ? params.imported : undefined;
+  const skippedCount = typeof params.skipped === "string" ? params.skipped : undefined;
+  const messageLabel = getMessageLabel(messageKey, importedCount, skippedCount);
 
   const where = {
     ...(selectedCategory === "all" ? {} : { category: selectedCategory }),
