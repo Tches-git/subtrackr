@@ -15,12 +15,37 @@ function normalizeBillingCycle(value: string) {
     : BillingCycle.MONTHLY;
 }
 
+function normalizeStatus(value: string) {
+  return Object.values(SubscriptionStatus).includes(value as SubscriptionStatus)
+    ? (value as SubscriptionStatus)
+    : SubscriptionStatus.ACTIVE;
+}
+
+function parseDate(value: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function redirectWithMessage(message: string, extra?: Record<string, string | number>) {
+  const search = new URLSearchParams({ message });
+
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      search.set(key, String(value));
+    }
+  }
+
+  redirect(`/?${search.toString()}`);
+}
+
 export async function createSubscription(formData: FormData) {
   const name = getString(formData.get("name"));
   const category = getString(formData.get("category")) || "Other";
   const priceValue = getString(formData.get("price"));
   const currency = getString(formData.get("currency")) || "USD";
   const billingCycleValue = getString(formData.get("billingCycle")) || "MONTHLY";
+  const statusValue = getString(formData.get("status")) || "ACTIVE";
   const nextBillingDateValue = getString(formData.get("nextBillingDate"));
   const trialEndsAtValue = getString(formData.get("trialEndsAt"));
   const color = getString(formData.get("color")) || "#6366f1";
@@ -28,14 +53,24 @@ export async function createSubscription(formData: FormData) {
   const notes = getString(formData.get("notes"));
 
   const price = Number(priceValue);
-  const nextBillingDate = nextBillingDateValue ? new Date(nextBillingDateValue) : null;
-  const trialEndsAt = trialEndsAtValue ? new Date(trialEndsAtValue) : null;
+  const nextBillingDate = parseDate(nextBillingDateValue);
+  const trialEndsAt = parseDate(trialEndsAtValue);
 
-  if (!name || Number.isNaN(price) || price < 0 || !nextBillingDate) {
-    throw new Error("Invalid subscription input");
+  if (!name) {
+    redirectWithMessage("form-error-name");
   }
 
+  if (Number.isNaN(price) || price < 0) {
+    redirectWithMessage("form-error-price");
+  }
+
+  if (!nextBillingDate) {
+    redirectWithMessage("form-error-next-billing");
+  }
+
+  const safeNextBillingDate = nextBillingDate as Date;
   const billingCycle = normalizeBillingCycle(billingCycleValue);
+  const status = normalizeStatus(statusValue);
 
   await prisma.subscription.create({
     data: {
@@ -45,8 +80,8 @@ export async function createSubscription(formData: FormData) {
       currency,
       billingCycle,
       billingInterval: 1,
-      status: SubscriptionStatus.ACTIVE,
-      nextBillingDate,
+      status,
+      nextBillingDate: safeNextBillingDate,
       trialEndsAt,
       color,
       website: website || null,
@@ -65,6 +100,7 @@ export async function updateSubscription(formData: FormData) {
   const priceValue = getString(formData.get("price"));
   const currency = getString(formData.get("currency")) || "USD";
   const billingCycleValue = getString(formData.get("billingCycle")) || "MONTHLY";
+  const statusValue = getString(formData.get("status")) || "ACTIVE";
   const nextBillingDateValue = getString(formData.get("nextBillingDate"));
   const trialEndsAtValue = getString(formData.get("trialEndsAt"));
   const color = getString(formData.get("color")) || "#6366f1";
@@ -72,14 +108,28 @@ export async function updateSubscription(formData: FormData) {
   const notes = getString(formData.get("notes"));
 
   const price = Number(priceValue);
-  const nextBillingDate = nextBillingDateValue ? new Date(nextBillingDateValue) : null;
-  const trialEndsAt = trialEndsAtValue ? new Date(trialEndsAtValue) : null;
+  const nextBillingDate = parseDate(nextBillingDateValue);
+  const trialEndsAt = parseDate(trialEndsAtValue);
 
-  if (!id || !name || Number.isNaN(price) || price < 0 || !nextBillingDate) {
-    throw new Error("Invalid subscription input");
+  if (!id) {
+    redirectWithMessage("form-error-missing-id");
   }
 
+  if (!name) {
+    redirectWithMessage("form-error-name", { edit: id });
+  }
+
+  if (Number.isNaN(price) || price < 0) {
+    redirectWithMessage("form-error-price", { edit: id });
+  }
+
+  if (!nextBillingDate) {
+    redirectWithMessage("form-error-next-billing", { edit: id });
+  }
+
+  const safeNextBillingDate = nextBillingDate as Date;
   const billingCycle = normalizeBillingCycle(billingCycleValue);
+  const status = normalizeStatus(statusValue);
 
   await prisma.subscription.update({
     where: { id },
@@ -89,7 +139,8 @@ export async function updateSubscription(formData: FormData) {
       price,
       currency,
       billingCycle,
-      nextBillingDate,
+      status,
+      nextBillingDate: safeNextBillingDate,
       trialEndsAt,
       color,
       website: website || null,
@@ -105,7 +156,7 @@ export async function deleteSubscription(formData: FormData) {
   const id = getString(formData.get("id"));
 
   if (!id) {
-    throw new Error("Missing subscription id");
+    redirectWithMessage("delete-error-missing-id");
   }
 
   await prisma.subscription.delete({
@@ -120,13 +171,19 @@ export async function importSubscriptions(formData: FormData) {
   const payload = getString(formData.get("payload"));
 
   if (!payload) {
-    throw new Error("Import payload is empty");
+    redirectWithMessage("import-error-empty");
   }
 
-  const parsed = JSON.parse(payload) as Array<Record<string, unknown>>;
+  let parsed: Array<Record<string, unknown>> = [];
 
-  if (!Array.isArray(parsed)) {
-    throw new Error("Import payload must be a JSON array");
+  try {
+    const raw = JSON.parse(payload) as unknown;
+    if (!Array.isArray(raw)) {
+      throw new Error("Import payload must be a JSON array");
+    }
+    parsed = raw as Array<Record<string, unknown>>;
+  } catch {
+    redirectWithMessage("import-error");
   }
 
   let imported = 0;
@@ -138,6 +195,7 @@ export async function importSubscriptions(formData: FormData) {
     const price = Number(item.price ?? 0);
     const currency = typeof item.currency === "string" ? item.currency.trim() || "USD" : "USD";
     const billingCycle = normalizeBillingCycle(typeof item.billingCycle === "string" ? item.billingCycle : "MONTHLY");
+    const status = normalizeStatus(typeof item.status === "string" ? item.status : "ACTIVE");
     const nextBillingDateValue = typeof item.nextBillingDate === "string" ? item.nextBillingDate : "";
     const trialEndsAtValue = typeof item.trialEndsAt === "string" ? item.trialEndsAt : "";
     const color = typeof item.color === "string" ? item.color : "#6366f1";
@@ -149,7 +207,12 @@ export async function importSubscriptions(formData: FormData) {
       continue;
     }
 
-    const nextBillingDate = new Date(nextBillingDateValue);
+    const nextBillingDate = parseDate(nextBillingDateValue);
+
+    if (!nextBillingDate) {
+      skipped += 1;
+      continue;
+    }
 
     const existing = await prisma.subscription.findFirst({
       where: {
@@ -173,9 +236,9 @@ export async function importSubscriptions(formData: FormData) {
         currency,
         billingCycle,
         billingInterval: 1,
-        status: SubscriptionStatus.ACTIVE,
+        status,
         nextBillingDate,
-        trialEndsAt: trialEndsAtValue ? new Date(trialEndsAtValue) : null,
+        trialEndsAt: parseDate(trialEndsAtValue),
         color,
         website,
         notes,

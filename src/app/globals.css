@@ -33,3 +33,53 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.surface-card {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 1.5rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.soft-panel {
+  border-radius: 1rem;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.empty-state {
+  border-radius: 1rem;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+}
+
+.filter-pill {
+  border-radius: 9999px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #475569;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-badge-active {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.status-badge-paused {
+  background: #fff7ed;
+  color: #b45309;
+}
+
+.status-badge-canceled {
+  background: #f1f5f9;
+  color: #64748b;
+}

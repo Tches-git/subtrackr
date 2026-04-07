@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SubscriptionStatus } from "@/generated/prisma/client";
-import { BellRing, CalendarClock, CreditCard, Sparkles, Wallet } from "lucide-react";
+import { BellRing, CalendarClock, CreditCard, Search, Sparkles, Wallet, X } from "lucide-react";
 import { DeleteSubscriptionButton } from "@/components/delete-subscription-button";
 import { EditSubscriptionLink } from "@/components/edit-subscription-link";
 import { ImportSubscriptionsForm } from "@/components/import-subscriptions-form";
@@ -34,12 +34,92 @@ function getMessageLabel(
   if (message === "created") return "Subscription created successfully.";
   if (message === "updated") return "Subscription updated successfully.";
   if (message === "deleted") return "Subscription deleted successfully.";
+  if (message === "delete-error-missing-id") {
+    return "Delete failed because the subscription id was missing.";
+  }
   if (message === "imported") {
     const importedCount = Number(imported ?? 0);
     const skippedCount = Number(skipped ?? 0);
     return `Import complete: ${importedCount} added, ${skippedCount} skipped.`;
   }
   return null;
+}
+
+function getStatusBadgeClass(status: string) {
+  if (status === "ACTIVE") return "status-badge status-badge-active";
+  if (status === "PAUSED") return "status-badge status-badge-paused";
+  return "status-badge status-badge-canceled";
+}
+
+function getIntervalDays(cycle: string, interval = 1) {
+  const safeInterval = Math.max(interval || 1, 1);
+  if (cycle === "WEEKLY") return 7 * safeInterval;
+  if (cycle === "YEARLY") return 365 * safeInterval;
+  if (cycle === "CUSTOM") return 30 * safeInterval;
+  return 30 * safeInterval;
+}
+
+function getMonthlyEquivalent(price: number, cycle: string, interval = 1) {
+  if (cycle === "TRIAL") return 0;
+  const intervalDays = getIntervalDays(cycle, interval);
+  return price * (30 / intervalDays);
+}
+
+function getAnnualEquivalent(price: number, cycle: string, interval = 1) {
+  if (cycle === "TRIAL") return 0;
+  const intervalDays = getIntervalDays(cycle, interval);
+  return price * (365 / intervalDays);
+}
+
+function getProjectedChargesWithinWindow(
+  price: number,
+  cycle: string,
+  nextBillingDate: Date,
+  windowEnd: Date,
+  interval = 1,
+) {
+  if (cycle === "TRIAL" || nextBillingDate > windowEnd) {
+    return 0;
+  }
+
+  const intervalDays = getIntervalDays(cycle, interval);
+  const diffMs = windowEnd.getTime() - nextBillingDate.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const occurrences = Math.floor(diffDays / intervalDays) + 1;
+  return price * Math.max(occurrences, 0);
+}
+
+function buildDashboardQuery(params: {
+  category?: string;
+  status?: string;
+  sort?: string;
+  q?: string;
+  view?: string;
+}) {
+  const search = new URLSearchParams();
+
+  if (params.category && params.category !== "all") {
+    search.set("category", params.category);
+  }
+
+  if (params.status && params.status !== "all") {
+    search.set("status", params.status);
+  }
+
+  if (params.sort && params.sort !== "nextBilling") {
+    search.set("sort", params.sort);
+  }
+
+  if (params.q && params.q.trim()) {
+    search.set("q", params.q.trim());
+  }
+
+  if (params.view && params.view !== "custom") {
+    search.set("view", params.view);
+  }
+
+  const query = search.toString();
+  return query ? `/?${query}` : "/";
 }
 
 export default async function Home({
@@ -51,6 +131,8 @@ export default async function Home({
   const selectedCategory = typeof params.category === "string" ? params.category : "all";
   const selectedStatusParam = typeof params.status === "string" ? params.status : "all";
   const selectedSort = typeof params.sort === "string" ? params.sort : "nextBilling";
+  const searchQuery = typeof params.q === "string" ? params.q.trim() : "";
+  const selectedView = typeof params.view === "string" ? params.view : "custom";
   const selectedStatus =
     selectedStatusParam === "ACTIVE" ||
     selectedStatusParam === "PAUSED" ||
@@ -63,9 +145,54 @@ export default async function Home({
   const skippedCount = typeof params.skipped === "string" ? params.skipped : undefined;
   const messageLabel = getMessageLabel(messageKey, importedCount, skippedCount);
 
+  const now = new Date();
+  const next7Days = new Date(now);
+  next7Days.setDate(next7Days.getDate() + 7);
+  const next30Days = new Date(now);
+  next30Days.setDate(next30Days.getDate() + 30);
+
   const where = {
     ...(selectedCategory === "all" ? {} : { category: selectedCategory }),
     ...(selectedStatus === "all" ? {} : { status: selectedStatus as SubscriptionStatus }),
+    ...(searchQuery
+      ? {
+          OR: [
+            { name: { contains: searchQuery } },
+            { category: { contains: searchQuery } },
+            { website: { contains: searchQuery } },
+            { notes: { contains: searchQuery } },
+          ],
+        }
+      : {}),
+    ...(selectedView === "renewing-soon"
+      ? {
+          status: SubscriptionStatus.ACTIVE,
+          nextBillingDate: {
+            lte: next7Days,
+          },
+        }
+      : {}),
+    ...(selectedView === "high-cost"
+      ? {
+          status: SubscriptionStatus.ACTIVE,
+          price: {
+            gte: 15,
+          },
+        }
+      : {}),
+    ...(selectedView === "trials"
+      ? {
+          trialEndsAt: {
+            not: null,
+            lte: next7Days,
+          },
+        }
+      : {}),
+    ...(selectedView === "paused"
+      ? {
+          status: SubscriptionStatus.PAUSED,
+        }
+      : {}),
   };
 
   const subscriptions = await prisma.subscription.findMany({
@@ -92,27 +219,34 @@ export default async function Home({
     : null;
 
   const activeSubscriptions = subscriptions.filter((item) => item.status === "ACTIVE");
-  const monthlySpend = activeSubscriptions.reduce((sum, item) => {
-    if (item.billingCycle === "YEARLY") return sum + item.price / 12;
-    if (item.billingCycle === "WEEKLY") return sum + item.price * 4;
-    return sum + item.price;
-  }, 0);
-  const annualSpend = activeSubscriptions.reduce((sum, item) => {
-    if (item.billingCycle === "YEARLY") return sum + item.price;
-    if (item.billingCycle === "WEEKLY") return sum + item.price * 52;
-    return sum + item.price * 12;
-  }, 0);
-
-  const now = new Date();
-  const next7Days = new Date(now);
-  next7Days.setDate(next7Days.getDate() + 7);
-  const next30Days = new Date(now);
-  next30Days.setDate(next30Days.getDate() + 30);
+  const pausedSubscriptions = subscriptions.filter((item) => item.status === "PAUSED");
+  const canceledSubscriptions = subscriptions.filter((item) => item.status === "CANCELED");
+  const monthlySpend = activeSubscriptions.reduce(
+    (sum, item) => sum + getMonthlyEquivalent(item.price, item.billingCycle, item.billingInterval),
+    0,
+  );
+  const annualSpend = activeSubscriptions.reduce(
+    (sum, item) => sum + getAnnualEquivalent(item.price, item.billingCycle, item.billingInterval),
+    0,
+  );
 
   const upcomingSubscriptions = activeSubscriptions.filter(
     (item) => item.nextBillingDate <= next30Days,
   );
 
+  const upcomingSpend = upcomingSubscriptions.reduce(
+    (sum, item) =>
+      sum +
+      getProjectedChargesWithinWindow(
+        item.price,
+        item.billingCycle,
+        item.nextBillingDate,
+        next30Days,
+        item.billingInterval,
+      ),
+    0,
+  );
+  const highestCostSubscription = [...activeSubscriptions].sort((a, b) => b.price - a.price)[0] ?? null;
   const upcoming7Days = activeSubscriptions.filter((item) => item.nextBillingDate <= next7Days);
   const trialsEndingSoon = subscriptions.filter(
     (item) => item.trialEndsAt && item.trialEndsAt <= next7Days,
@@ -151,6 +285,71 @@ export default async function Home({
       })),
   ].slice(0, 5);
 
+  const hasActiveFilters =
+    selectedCategory !== "all" ||
+    selectedStatus !== "all" ||
+    selectedSort !== "nextBilling" ||
+    Boolean(searchQuery) ||
+    selectedView !== "custom";
+
+  const quickViews = [
+    {
+      label: "All subscriptions",
+      value: "custom",
+      href: buildDashboardQuery({
+        category: selectedCategory,
+        status: selectedStatus,
+        sort: selectedSort,
+        q: searchQuery,
+      }),
+      note: "Current dashboard view",
+    },
+    {
+      label: "Renewing soon",
+      value: "renewing-soon",
+      href: buildDashboardQuery({
+        category: selectedCategory,
+        sort: selectedSort,
+        q: searchQuery,
+        view: "renewing-soon",
+      }),
+      note: "Active subscriptions due within 7 days",
+    },
+    {
+      label: "High cost",
+      value: "high-cost",
+      href: buildDashboardQuery({
+        category: selectedCategory,
+        sort: selectedSort,
+        q: searchQuery,
+        view: "high-cost",
+      }),
+      note: "Active subscriptions priced at 15+",
+    },
+    {
+      label: "Trials ending",
+      value: "trials",
+      href: buildDashboardQuery({
+        category: selectedCategory,
+        sort: selectedSort,
+        q: searchQuery,
+        view: "trials",
+      }),
+      note: "Trial expirations within 7 days",
+    },
+    {
+      label: "Paused",
+      value: "paused",
+      href: buildDashboardQuery({
+        category: selectedCategory,
+        sort: selectedSort,
+        q: searchQuery,
+        view: "paused",
+      }),
+      note: "Subscriptions you paused",
+    },
+  ];
+
   const stats = [
     {
       label: "Monthly spend",
@@ -184,6 +383,39 @@ export default async function Home({
       value: String(reminders.length),
       note: reminders[0]?.text ?? "No urgent reminders yet",
       icon: BellRing,
+    },
+  ];
+
+  const insights = [
+    {
+      label: "Highest active cost",
+      value: highestCostSubscription
+        ? formatCurrency(highestCostSubscription.price, highestCostSubscription.currency)
+        : "$0.00",
+      note: highestCostSubscription
+        ? `${highestCostSubscription.name} is currently your priciest active subscription`
+        : "Add active subscriptions to surface this insight",
+    },
+    {
+      label: "Upcoming 30-day charges",
+      value: formatCurrency(upcomingSpend),
+      note:
+        upcomingSubscriptions.length > 0
+          ? `${upcomingSubscriptions.length} active subscriptions are expected to bill within 30 days, including repeat weekly/custom charges`
+          : "No active renewals are due in the next 30 days",
+    },
+    {
+      label: "Trial risk",
+      value: `${trialsEndingSoon.length} ending soon`,
+      note:
+        trialsEndingSoon[0] != null
+          ? `${trialsEndingSoon[0].name} is the next trial to expire`
+          : "No trial expirations are currently urgent",
+    },
+    {
+      label: "Paused / canceled",
+      value: `${pausedSubscriptions.length} / ${canceledSubscriptions.length}`,
+      note: "Paused vs canceled subscriptions in the current view",
     },
   ];
 
@@ -225,7 +457,7 @@ export default async function Home({
           return (
             <article
               key={item.label}
-              className="rounded-3xl border border-white/70 bg-white p-5 shadow-sm"
+              className="surface-card p-5"
             >
               <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
                 <Icon className="h-5 w-5" />
@@ -240,7 +472,7 @@ export default async function Home({
 
       <section className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
         <div className="grid gap-6">
-          <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
+          <article className="surface-card p-6">
             <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Subscriptions</h2>
@@ -258,6 +490,85 @@ export default async function Home({
                 </div>
               </div>
 
+              <div className="text-sm text-slate-500 md:text-right">
+                Showing <span className="font-medium text-slate-900">{subscriptions.length}</span> matching subscriptions
+              </div>
+            </div>
+
+            <div className="soft-panel mb-5 grid gap-4 p-4">
+              <div className="grid gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-700">Quick views</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {quickViews.map((view) => (
+                      <Link
+                        key={view.value}
+                        href={view.href}
+                        className={`rounded-full px-3 py-2 text-sm ${selectedView === view.value ? "bg-slate-900 text-white" : "filter-pill"}`}
+                        title={view.note}
+                      >
+                        {view.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+
+                <form action="/" className="flex flex-col gap-3 md:flex-row md:items-center">
+                  <input type="hidden" name="category" value={selectedCategory} />
+                  <input type="hidden" name="status" value={selectedStatus} />
+                  <input type="hidden" name="sort" value={selectedSort} />
+                  {selectedView !== "custom" ? <input type="hidden" name="view" value={selectedView} /> : null}
+                  <div className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="search"
+                      name="q"
+                      defaultValue={searchQuery}
+                      placeholder="Search by name, category, notes, or website"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-700 outline-none ring-0 focus:border-indigo-400"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800"
+                  >
+                    Search
+                  </button>
+                  {searchQuery ? (
+                    <Link
+                      href={buildDashboardQuery({
+                        category: selectedCategory,
+                        status: selectedStatus,
+                        sort: selectedSort,
+                        view: selectedView,
+                      })}
+                      className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 hover:border-slate-300"
+                    >
+                      Clear search
+                    </Link>
+                  ) : null}
+                </form>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="font-medium text-slate-700">Active filters:</span>
+                {selectedView !== "custom" ? <span className="filter-pill px-3 py-1">View: {selectedView}</span> : null}
+                {searchQuery ? <span className="filter-pill px-3 py-1">Search: {searchQuery}</span> : null}
+                {selectedCategory !== "all" ? <span className="filter-pill px-3 py-1">Category: {selectedCategory}</span> : null}
+                {selectedStatus !== "all" ? <span className="filter-pill px-3 py-1">Status: {selectedStatus}</span> : null}
+                {selectedSort !== "nextBilling" ? <span className="filter-pill px-3 py-1">Sort: {selectedSort}</span> : null}
+                {!hasActiveFilters ? <span className="filter-pill px-3 py-1">None</span> : null}
+                {hasActiveFilters ? (
+                  <Link
+                    href="/"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600 hover:border-slate-300"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear all
+                  </Link>
+                ) : null}
+              </div>
+
               <div className="grid gap-3">
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -268,8 +579,14 @@ export default async function Home({
                   ].map((sort) => (
                     <Link
                       key={sort.value}
-                      href={`/?${selectedCategory === "all" ? "" : `category=${encodeURIComponent(selectedCategory)}&`}status=${selectedStatus}&sort=${sort.value}`}
-                      className={`rounded-full px-3 py-2 text-sm ${selectedSort === sort.value ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                      href={buildDashboardQuery({
+                        category: selectedCategory,
+                        status: selectedStatus,
+                        sort: sort.value,
+                        q: searchQuery,
+                        view: selectedView,
+                      })}
+                      className={`rounded-full px-3 py-2 text-sm ${selectedSort === sort.value ? "bg-slate-900 text-white" : "filter-pill"}`}
                     >
                       {sort.label}
                     </Link>
@@ -277,16 +594,27 @@ export default async function Home({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link
-                    href={`/?status=${selectedStatus}&sort=${selectedSort}`}
-                    className={`rounded-full px-3 py-2 text-sm ${selectedCategory === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                    href={buildDashboardQuery({
+                      status: selectedStatus,
+                      sort: selectedSort,
+                      q: searchQuery,
+                      view: selectedView,
+                    })}
+                    className={`rounded-full px-3 py-2 text-sm ${selectedCategory === "all" ? "bg-slate-900 text-white" : "filter-pill"}`}
                   >
                     All categories
                   </Link>
                   {allCategories.map((category) => (
                     <Link
                       key={category}
-                      href={`/?category=${encodeURIComponent(category)}&status=${selectedStatus}&sort=${selectedSort}`}
-                      className={`rounded-full px-3 py-2 text-sm ${selectedCategory === category ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                      href={buildDashboardQuery({
+                        category,
+                        status: selectedStatus,
+                        sort: selectedSort,
+                        q: searchQuery,
+                        view: selectedView,
+                      })}
+                      className={`rounded-full px-3 py-2 text-sm ${selectedCategory === category ? "bg-slate-900 text-white" : "filter-pill"}`}
                     >
                       {category}
                     </Link>
@@ -301,7 +629,13 @@ export default async function Home({
                   ].map((status) => (
                     <Link
                       key={status.value}
-                      href={`/?${selectedCategory === "all" ? "" : `category=${encodeURIComponent(selectedCategory)}&`}status=${status.value}&sort=${selectedSort}`}
+                      href={buildDashboardQuery({
+                        category: selectedCategory,
+                        status: status.value,
+                        sort: selectedSort,
+                        q: searchQuery,
+                        view: selectedView,
+                      })}
                       className={`rounded-full px-3 py-2 text-sm ${selectedStatus === status.value ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700"}`}
                     >
                       {status.label}
@@ -313,10 +647,10 @@ export default async function Home({
 
             <div className="space-y-3">
               {subscriptions.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-                  No subscriptions in this view yet.
+                <div className="empty-state p-6 text-sm text-slate-500">
+                  No subscriptions match the current search and filter combination.
                   <div className="mt-2 text-slate-400">
-                    Try switching filters or add your first subscription to start tracking recurring costs.
+                    Try clearing filters, changing your keyword, or add a new subscription to expand the dataset.
                   </div>
                 </div>
               ) : (
@@ -346,7 +680,9 @@ export default async function Home({
                         <div className="text-slate-500">
                           Next billing: {formatDate(item.nextBillingDate)}
                         </div>
-                        <div className="text-xs font-medium text-amber-600">{item.status}</div>
+                        <div className={getStatusBadgeClass(item.status)}>
+                          {item.status}
+                        </div>
                       </div>
                     </div>
 
@@ -367,11 +703,11 @@ export default async function Home({
             </div>
           </article>
 
-          <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
+          <article className="surface-card p-6">
             <h2 className="text-xl font-semibold text-slate-900">Upcoming reminders</h2>
             <div className="mt-4 space-y-3">
               {reminders.length === 0 ? (
-                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                <div className="soft-panel p-4 text-sm text-slate-700">
                   No urgent reminders. Add more subscriptions or trial dates to populate this view.
                 </div>
               ) : (
@@ -386,18 +722,35 @@ export default async function Home({
               )}
             </div>
           </article>
+
+          <article className="surface-card p-6">
+            <h2 className="text-xl font-semibold text-slate-900">Insights snapshot</h2>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {insights.map((item) => (
+                <div key={item.label} className="soft-panel p-4">
+                  <div className="text-sm text-slate-500">{item.label}</div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</div>
+                  <div className="mt-2 text-sm text-slate-500">{item.note}</div>
+                </div>
+              ))}
+            </div>
+          </article>
         </div>
 
         <div className="grid gap-6">
-          <SubscriptionForm mode={editingSubscription ? "edit" : "create"} subscription={editingSubscription ?? undefined} />
+          <SubscriptionForm
+            mode={editingSubscription ? "edit" : "create"}
+            subscription={editingSubscription ?? undefined}
+            message={messageKey}
+          />
 
-          <ImportSubscriptionsForm />
+          <ImportSubscriptionsForm message={messageKey} />
 
-          <article className="rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
+          <article className="surface-card p-6">
             <h2 className="text-xl font-semibold text-slate-900">Spend by category</h2>
             <div className="mt-5 space-y-4">
               {categorySpend.length === 0 ? (
-                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                <div className="soft-panel p-4 text-sm text-slate-700">
                   Category insights will appear after you add subscriptions.
                 </div>
               ) : (

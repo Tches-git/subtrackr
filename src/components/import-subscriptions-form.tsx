@@ -15,7 +15,15 @@ const samplePayload = `[
   }
 ]`;
 
-export function ImportSubscriptionsForm() {
+function getImportErrorLabel(message?: string) {
+  if (message === "import-error") return "Import failed. Please paste a valid JSON array payload.";
+  if (message === "import-error-empty") return "Please paste a JSON payload before importing.";
+  return null;
+}
+
+export function ImportSubscriptionsForm({ message }: { message?: string }) {
+  const errorLabel = getImportErrorLabel(message);
+
   return (
     <form action={importSubscriptions} className="grid gap-4 rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
       <div>
@@ -24,6 +32,12 @@ export function ImportSubscriptionsForm() {
           Paste an exported JSON array to bulk-create subscriptions. Duplicate items with the same name, price, and next billing date will be skipped.
         </p>
       </div>
+
+      {errorLabel ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {errorLabel}
+        </div>
+      ) : null}
 
       <label className="grid gap-2 text-sm text-slate-600">
         JSON payload

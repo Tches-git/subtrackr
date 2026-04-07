@@ -8,6 +8,7 @@ type SubscriptionFormData = {
   price: number;
   currency: string;
   billingCycle: string;
+  status: string;
   nextBillingDate: Date;
   trialEndsAt: Date | null;
   color: string | null;
@@ -22,9 +23,16 @@ const billingCycles = [
   { label: "Trial", value: "TRIAL" },
 ];
 
+const statuses = [
+  { label: "Active", value: "ACTIVE" },
+  { label: "Paused", value: "PAUSED" },
+  { label: "Canceled", value: "CANCELED" },
+];
+
 type Props = {
   mode: "create" | "edit";
   subscription?: SubscriptionFormData;
+  message?: string;
 };
 
 function toDateInput(value?: Date | null) {
@@ -32,13 +40,22 @@ function toDateInput(value?: Date | null) {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-export function SubscriptionForm({ mode, subscription }: Props) {
+function getFormErrorLabel(message?: string) {
+  if (message === "form-error-name") return "Please enter a subscription name.";
+  if (message === "form-error-price") return "Please enter a valid non-negative price.";
+  if (message === "form-error-next-billing") return "Please provide a valid next billing date.";
+  if (message === "form-error-missing-id") return "This subscription could not be found for editing. Please reopen it and try again.";
+  return null;
+}
+
+export function SubscriptionForm({ mode, subscription, message }: Props) {
   const action = mode === "edit" ? updateSubscription : createSubscription;
   const title = mode === "edit" ? "Edit subscription" : "Add subscription";
   const description =
     mode === "edit"
       ? "Update an existing entry and keep the dashboard in sync."
       : "Create a real entry and watch the dashboard update from SQLite.";
+  const errorLabel = getFormErrorLabel(message);
 
   return (
     <form action={action} className="grid gap-4 rounded-3xl border border-white/70 bg-white p-6 shadow-sm">
@@ -48,6 +65,12 @@ export function SubscriptionForm({ mode, subscription }: Props) {
         <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
         <p className="mt-1 text-sm text-slate-500">{description}</p>
       </div>
+
+      {errorLabel ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {errorLabel}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2 text-sm text-slate-600">
@@ -74,6 +97,17 @@ export function SubscriptionForm({ mode, subscription }: Props) {
           Billing cycle
           <select name="billingCycle" defaultValue={subscription?.billingCycle ?? "MONTHLY"} className="rounded-2xl border border-slate-200 px-4 py-3 outline-none ring-0 focus:border-indigo-400">
             {billingCycles.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-2 text-sm text-slate-600">
+          Status
+          <select name="status" defaultValue={subscription?.status ?? "ACTIVE"} className="rounded-2xl border border-slate-200 px-4 py-3 outline-none ring-0 focus:border-indigo-400">
+            {statuses.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>
